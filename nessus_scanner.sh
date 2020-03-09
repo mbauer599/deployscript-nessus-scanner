@@ -37,7 +37,6 @@ fi
 if [ ! -f "$nessus_api" ]; then
   echo "Nessus API tokens not found, creating.."
   cat >"$nessus_api" <<EOL
-#!/usr/bin/env bash
 secretKey=""
 accessKey=""
 EOL
@@ -69,14 +68,21 @@ fi
 # Check if JQ is present, you need this for parsing JSON responses.
 if [[ -z $(command -v jq) ]]; then
   echo "jq was not detected, installing.."
-  apt update
+  apt update -qq
   apt install jq -y
+fi
+
+# Check if JQ is present, you need this for parsing JSON responses.
+if [[ -z $(command -v pwgen) ]]; then
+  echo "pwgen was not detected, installing.."
+  apt update -qq
+  apt install pwgen -y
 fi
 
 # Check if cURL is present
 if [[ -z $(command -v curl) ]]; then
   echo "curl was not detected, installing.."
-  apt update
+  apt update -qq
   apt install curl -y
 fi
 
@@ -89,24 +95,37 @@ fi
 # Making sure the imaage is up to date
 docker pull stevemcgrath/nessus_scanner
 
-# Make sure Scanner Name isn't already taken
+# Make sure Scanner doesn't exist in console and purge if it does
 scanner_info=$(curl -s --request GET --url https://cloud.tenable.com/scanners -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanners[] | select(.name==\"$scanner_name\")")
 if [[ -n "$scanner_info" ]]; then
-  echo "======================================"
-  echo "Scanner Exists in Console, Aborting..."
-  echo "======================================"
-  echo "$scanner_info" | jq
-  echo "======================================"
-  exit 1
+  echo "Scanner exists in console, purging.."
+  scanner_id=$(echo "$scanner_info" | jq '.id')
+  curl --request DELETE --url "https://cloud.tenable.com/scanners/$scanner_id" -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;"
+  echo "Sleeping until purged from Console"
+  while : ; do
+  scanner_info=$(curl -s --request GET --url https://cloud.tenable.com/scanners -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanners[] | select(.name==\"$scanner_name\")")
+  if [[ -n "$scanner_info" ]]; then
+    break
+  fi
+  sleep 20
+  done
 fi
 
-# Doing stuff
+# Make sure Container doesn't exist and purge if it does so it can be rebuilt
+docker_image="$(docker ps -a | awk \"/$scanner_name/\")"
+if [[ -n "$docker_image" ]]; then
+  echo "Purging existing container.."
+  docker stop "$scanner_name"
+  docker rm "$scanner_name"
+fi
+
+# Building the Container
 docker run -dt \
     -e LINKING_KEY="$scanner_key"\
     -e SCANNER_NAME="$scanner_name"\
     -e ADMIN_USER="itsecops"\
-    -e ADMIN_PASS="0l51FlC6r2jHQYs1H"\
-    --name nessus_scanner\
+    -e ADMIN_PASS="$(pwgen $(( ( RANDOM % 10 )  + 9 )) 1)"\
+    --name "$scanner_name"\
     stevemcgrath/nessus_scanner:latest
 
 # Sleeping for a couple minutes while Scanner is built.
@@ -133,7 +152,14 @@ if [[ -n "$accessKey" ]] || [[ -n "$secretKey" ]] || [[ -n "$scanner_group" ]]; 
     curl --request POST --url "https://cloud.tenable.com/scanner-groups/$group_id/scanners/$scanner_id" -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;"
   else
     # We can add an API call to build the group here.
-    echo "No Group Detected, aborting adding sensor to group.."
+    echo "No Group Detected, creating first.."
+    curl -s --request POST --url https://cloud.tenable.com/scanner-groups --header 'content-type: application/json' --header 'accept: application/json' -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey; name=$scanner_name" --data @<(cat <<EOF
+{
+  "name": "$scanner_group",
+  "type":"load_balancing"
+  }
+EOF
+)
   fi
 else
   echo "Invalid API or Group Info Set, aborting adding sensor to group..."
