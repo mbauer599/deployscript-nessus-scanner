@@ -160,6 +160,14 @@ if [[ -n "$accessKey" ]] || [[ -n "$secretKey" ]] || [[ -n "$scanner_group" ]]; 
   }
 EOF
 )
+    group_info=$(curl -s --request GET --url https://cloud.tenable.com/scanner-groups -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanner_pools[] | select(.name==\"$scanner_group\")")
+    if [[ -n group_info ]]; then
+      # Getting Group ID
+      group_id=$(echo "$group_info" | jq '.id')
+      # Getting Scanner ID
+      # Adding Scanner to Group
+      curl --request POST --url "https://cloud.tenable.com/scanner-groups/$group_id/scanners/$scanner_id" -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;"
+    fi
   fi
 else
   echo "Invalid API or Group Info Set, aborting adding sensor to group..."
