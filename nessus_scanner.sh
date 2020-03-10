@@ -103,10 +103,12 @@ if [[ -n "$scanner_info" ]]; then
   curl --request DELETE --url "https://cloud.tenable.com/scanners/$scanner_id" -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;"
   echo "Sleeping until purged from Console"
   while : ; do
-  scanner_info=$(curl -s --request GET --url https://cloud.tenable.com/scanners -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanners[] | select(.name==\"$scanner_name\")")
-  if [[ -n "$scanner_info" ]]; then
-    break
-  fi
+    scanner_info=$(curl -s --request GET --url https://cloud.tenable.com/scanners -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanners[] | select(.name==\"$scanner_name\")")
+    if [[ -z "$scanner_info" ]]; then
+      echo "Scanner has been removed.."
+      break
+    fi
+  echo "."
   sleep 20
   done
 fi
@@ -133,8 +135,10 @@ echo "Sleeping while container is building (and checking every 20 seconds)..."
 while : ; do
   scanner_info=$(curl -s --request GET --url https://cloud.tenable.com/scanners -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanners[] | select(.name==\"$scanner_name\")")
   if [[ -n "$scanner_info" ]]; then
+    echo "Scanner has been found.." 
     break
   fi
+  echo "."
   sleep 20
 done
 
@@ -149,25 +153,26 @@ if [[ -n "$accessKey" ]] || [[ -n "$secretKey" ]] || [[ -n "$scanner_group" ]]; 
     #scanner_info=$(curl -s --request GET --url https://cloud.tenable.com/scanners -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanners[] | select(.name==\"$scanner_name\")")
     scanner_id=$(echo "$scanner_info" | jq '.id')
     # Adding Scanner to Group
+    echo "Adding Scanner to assigned group.."
     curl --request POST --url "https://cloud.tenable.com/scanner-groups/$group_id/scanners/$scanner_id" -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;"
   else
     # We can add an API call to build the group here.
     echo "No Group Detected, creating first.."
-    curl -s --request POST --url https://cloud.tenable.com/scanner-groups --header 'content-type: application/json' --header 'accept: application/json' -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey; name=$scanner_name" --data @<(cat <<EOF
-{
-  "name": "$scanner_group",
-  "type":"load_balancing"
-  }
-EOF
-)
-    group_info=$(curl -s --request GET --url https://cloud.tenable.com/scanner-groups -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanner_pools[] | select(.name==\"$scanner_group\")")
-    if [[ -n group_info ]]; then
-      # Getting Group ID
-      group_id=$(echo "$group_info" | jq '.id')
-      # Getting Scanner ID
-      # Adding Scanner to Group
-      curl --request POST --url "https://cloud.tenable.com/scanner-groups/$group_id/scanners/$scanner_id" -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;"
-    fi
+#    curl -s --request POST --url https://cloud.tenable.com/scanner-groups --header 'content-type: application/json' --header 'accept: application/json' -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey; name=$scanner_name" --data @<(cat <<EOF
+#{
+#  "name": "$scanner_group",
+#  "type":"load_balancing"
+#  }
+#EOF
+#)
+#    group_info=$(curl -s --request GET --url https://cloud.tenable.com/scanner-groups -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;" | jq ".scanner_pools[] | select(.name==\"$scanner_group\")")
+#    if [[ -n group_info ]]; then
+#      # Getting Group ID
+#      group_id=$(echo "$group_info" | jq '.id')
+#      # Getting Scanner ID
+#      # Adding Scanner to Group
+#      curl --request POST --url "https://cloud.tenable.com/scanner-groups/$group_id/scanners/$scanner_id" -H "X-ApiKeys: accessKey=$accessKey; secretKey=$secretKey;"
+#    fi
   fi
 else
   echo "Invalid API or Group Info Set, aborting adding sensor to group..."
